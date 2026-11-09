@@ -235,3 +235,51 @@ mod tests {
         assert_eq!(DEFAULT_BASE_URL, "https://192.168.10.108:8081/v1");
     }
 }
+
+/// End-to-end check against a running llama.cpp (or mock) server.
+/// Run with: AKTA_LLM_BASE_URL=https://127.0.0.1:18081/v1 cargo test --lib akta_internal_llm_e2e -- --ignored
+#[cfg(test)]
+mod e2e {
+    use super::*;
+    use crate::summary::llm_client::{generate_summary, LLMProvider};
+
+    #[tokio::test]
+    #[ignore]
+    async fn akta_internal_llm_e2e() {
+        let client = http_client(Some(Duration::from_secs(30))).unwrap();
+        let config = CustomOpenAIConfig {
+            endpoint: base_url(),
+            api_key: None,
+            model: FALLBACK_MODEL.to_string(),
+            max_tokens: None,
+            temperature: None,
+            top_p: None,
+        };
+        let model = resolve_model(&client, &config).await;
+        assert_ne!(
+            model, FALLBACK_MODEL,
+            "model should be resolved from /v1/models"
+        );
+        let ctx = context_window(&client, None).await;
+        assert!(ctx > 0);
+        let endpoint = base_url();
+        let completion = generate_summary(
+            &client,
+            &LLMProvider::CustomOpenAI,
+            &model,
+            "",
+            "You summarize meetings.",
+            "Transcript: we agreed to ship on Friday.",
+            None,
+            Some(&endpoint),
+            Some(256),
+            None,
+            None,
+            None,
+            None,
+        )
+        .await
+        .expect("chat completion should succeed");
+        println!("model={model} ctx={ctx} completion={completion:?}");
+    }
+}
