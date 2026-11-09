@@ -11,7 +11,7 @@ interface UseModelConfigurationProps {
 export function useModelConfiguration({ serverAddress }: UseModelConfigurationProps) {
   // Note: No hardcoded defaults - DB is the source of truth
   const [modelConfig, setModelConfig] = useState<ModelConfig>({
-    provider: 'ollama',
+    provider: 'custom-openai',
     model: '', // Empty until loaded from DB
     whisperModel: 'large-v3'
   });

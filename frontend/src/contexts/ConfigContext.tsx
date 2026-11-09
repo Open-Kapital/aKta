@@ -100,8 +100,8 @@ const ConfigContext = createContext<ConfigContextType | undefined>(undefined);
 export function ConfigProvider({ children }: { children: ReactNode }) {
   // Model configuration state
   const [modelConfig, setModelConfig] = useState<ModelConfig>({
-    provider: 'ollama',
-    model: 'llama3.2:latest',
+    provider: 'custom-openai',
+    model: 'akta-internal',
     whisperModel: 'large-v3',
     ollamaEndpoint: null
   });
@@ -181,6 +181,11 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   // Load Ollama models (uses saved endpoint, re-runs when endpoint changes after config load)
   useEffect(() => {
     const loadModels = async () => {
+      // aKta: summaries only use the internal AI, so never probe a local Ollama.
+      if (modelConfig.provider !== 'ollama') {
+        setModels([]);
+        return;
+      }
       try {
         const endpoint = modelConfig.ollamaEndpoint || null;
         const modelList = await invoke<OllamaModel[]>('get_ollama_models', { endpoint });
@@ -192,7 +197,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
       }
     };
     loadModels();
-  }, [modelConfig.ollamaEndpoint]);
+  }, [modelConfig.provider, modelConfig.ollamaEndpoint]);
 
   // Load transcript configuration on mount
   useEffect(() => {

@@ -173,23 +173,16 @@ pub async fn complete_onboarding<R: Runtime>(
     state: tauri::State<'_, AppState>,
     model: String,
 ) -> Result<(), String> {
-    info!("Completing onboarding with builtin-ai model: {}", model);
+    info!("Completing onboarding (summaries use the internal AI)");
 
     // Step 1: Save model configuration to SQLite database FIRST
     let pool = state.db_manager.pool();
 
-    // Onboarding always uses builtin-ai (local LLM)
-    if let Err(e) = SettingsRepository::save_model_config(
-        pool,
-        "builtin-ai",
-        &model,
-        "large-v3",
-        None,
-    ).await {
-        error!("Failed to save builtin-ai model config: {}", e);
-        return Err(format!("Failed to save builtin-ai model config: {}", e));
+    // aKta: summaries always use the internal llama.cpp server
+    if let Err(e) = crate::akta::internal_llm::ensure_settings(pool).await {
+        error!("Failed to save internal AI config: {}", e);
+        return Err(format!("Failed to save internal AI config: {}", e));
     }
-    info!("Saved builtin-ai model config: model={}", model);
 
     // Save transcription model config (parakeet provider) - always parakeet
     if let Err(e) = SettingsRepository::save_transcript_config(

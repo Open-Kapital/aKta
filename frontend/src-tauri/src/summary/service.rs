@@ -327,8 +327,8 @@ impl SummaryService {
     /// * `pool` - SQLx connection pool
     /// * `meeting_id` - Unique identifier for the meeting
     /// * `text` - Full transcript text
-    /// * `model_provider` - LLM provider name (e.g., "ollama", "openai")
-    /// * `model_name` - Specific model (e.g., "gpt-4", "llama3.2:latest")
+    /// * `requested_provider` - Provider requested by the UI (ignored: aKta always uses the internal AI)
+    /// * `requested_model` - Model requested by the UI (ignored in favour of the internal AI config)
     /// * `custom_prompt` - Optional user-provided context
     /// * `template_id` - Template identifier (e.g., "daily_standup", "standard_meeting")
     pub async fn process_transcript_background<R: tauri::Runtime>(
@@ -338,8 +338,8 @@ impl SummaryService {
         started_at: DateTime<Utc>,
         cancellation_token: CancellationToken,
         text: String,
-        model_provider: String,
-        model_name: String,
+        requested_provider: String,
+        requested_model: String,
         custom_prompt: String,
         template_id: String,
         summary_language: Option<String>,
@@ -350,87 +350,42 @@ impl SummaryService {
             meeting_id
         );
 
-        // Parse provider
-        let provider = match LLMProvider::from_str(&model_provider) {
-            Ok(p) => p,
+        // aKta: summaries always go to the internal llama.cpp server,
+        // regardless of the provider requested by the caller.
+        if requested_provider != crate::akta::internal_llm::PROVIDER {
+            info!(
+                "Ignoring requested provider {}/{}; aKta only uses the internal AI",
+                requested_provider, requested_model
+            );
+        }
+        let model_provider = crate::akta::internal_llm::PROVIDER.to_string();
+        let provider = LLMProvider::CustomOpenAI;
+        let internal_config = crate::akta::internal_llm::load_config(&pool).await;
+        let client = match crate::akta::internal_llm::http_client(None) {
+            Ok(client) => client,
             Err(e) => {
                 Self::fail_and_cleanup(&pool, &meeting_id, started_at, &e).await;
                 return;
             }
         };
-
-        // Validate and setup api_key, Flexible for Ollama, BuiltInAI, and CustomOpenAI
-        let api_key = if provider == LLMProvider::Ollama || provider == LLMProvider::BuiltInAI || provider == LLMProvider::CustomOpenAI {
-            // These providers don't require API keys from the standard database column
-            String::new()
-        } else {
-            match SettingsRepository::get_api_key(&pool, &model_provider).await {
-                Ok(Some(key)) if !key.is_empty() => key,
-                Ok(None) | Ok(Some(_)) => {
-                    let err_msg = format!("API key not found for {}", &model_provider);
-                    Self::fail_and_cleanup(&pool, &meeting_id, started_at, &err_msg).await;
-                    return;
-                }
-                Err(e) => {
-                    let err_msg = format!("Failed to retrieve API key for {}: {}", &model_provider, e);
-                    Self::fail_and_cleanup(&pool, &meeting_id, started_at, &err_msg).await;
-                    return;
-                }
-            }
-        };
-
-        // Get Ollama endpoint if provider is Ollama
-        let ollama_endpoint = if provider == LLMProvider::Ollama {
-            match SettingsRepository::get_model_config(&pool).await {
-                Ok(Some(config)) => config.ollama_endpoint,
-                Ok(None) => None,
-                Err(e) => {
-                    info!("Failed to retrieve Ollama endpoint: {}, using default", e);
-                    None
-                }
-            }
-        } else {
-            None
-        };
-
-        // Get CustomOpenAI config if provider is CustomOpenAI
-        let (custom_openai_endpoint, custom_openai_api_key, custom_openai_max_tokens, custom_openai_temperature, custom_openai_top_p) =
-            if provider == LLMProvider::CustomOpenAI {
-                match SettingsRepository::get_custom_openai_config(&pool).await {
-                    Ok(Some(config)) => {
-                        info!("✓ Using custom OpenAI endpoint: {}", config.endpoint);
-                        (
-                            Some(config.endpoint),
-                            config.api_key,
-                            config.max_tokens.map(|t| t as u32),
-                            config.temperature,
-                            config.top_p,
-                        )
-                    }
-                    Ok(None) => {
-                        let err_msg = "Custom OpenAI provider selected but no configuration found";
-                        Self::fail_and_cleanup(&pool, &meeting_id, started_at, err_msg).await;
-                        return;
-                    }
-                    Err(e) => {
-                        let err_msg = format!("Failed to retrieve custom OpenAI config: {}", e);
-                        Self::fail_and_cleanup(&pool, &meeting_id, started_at, &err_msg).await;
-                        return;
-                    }
-                }
-            } else {
-                (None, None, None, None, None)
-            };
-
-        // For CustomOpenAI, use its API key (if any) instead of the empty string
-        let final_api_key = if provider == LLMProvider::CustomOpenAI {
-            custom_openai_api_key.unwrap_or_default()
-        } else {
-            api_key
-        };
+        let model_name = crate::akta::internal_llm::resolve_model(&client, &internal_config).await;
+        info!("✓ Using internal AI at {} (model: {})", internal_config.endpoint, model_name);
+        let ollama_endpoint: Option<String> = None;
+        let custom_openai_endpoint = Some(internal_config.endpoint.clone());
+        let custom_openai_max_tokens = internal_config.max_tokens.map(|t| t as u32);
+        let custom_openai_temperature = internal_config.temperature;
+        let custom_openai_top_p = internal_config.top_p;
+        let final_api_key = internal_config.api_key.clone().unwrap_or_default();
 
         // Dynamically fetch context size based on provider and model
-        let token_threshold = if provider == LLMProvider::Ollama {
+        let token_threshold = if provider == LLMProvider::CustomOpenAI {
+            let context = crate::akta::internal_llm::context_window(
+                &client,
+                internal_config.api_key.as_deref(),
+            )
+            .await;
+            crate::akta::internal_llm::chunk_token_threshold(context)
+        } else if provider == LLMProvider::Ollama {
             match METADATA_CACHE.get_or_fetch(&model_name, ollama_endpoint.as_deref()).await {
                 Ok(metadata) => {
                     // Reserve 300 tokens for prompt overhead
@@ -543,7 +498,6 @@ impl SummaryService {
             }),
         };
 
-        let client = reqwest::Client::new();
         let result = generate_meeting_summary(
             &client,
             &provider,

@@ -1185,18 +1185,14 @@ pub async fn api_save_custom_openai_config<R: Runtime>(
         &model
     );
 
-    // Validate required fields
-    if endpoint.trim().is_empty() {
-        return Err("Endpoint URL is required".to_string());
-    }
-    if model.trim().is_empty() {
-        return Err("Model name is required".to_string());
-    }
-
-    // Validate endpoint URL format
-    if !endpoint.starts_with("http://") && !endpoint.starts_with("https://") {
-        return Err("Endpoint must start with http:// or https://".to_string());
-    }
+    // aKta: the endpoint is fixed to the internal AI server.
+    let _ = endpoint;
+    let endpoint = crate::akta::internal_llm::base_url();
+    let model = if model.trim().is_empty() {
+        crate::akta::internal_llm::FALLBACK_MODEL.to_string()
+    } else {
+        model
+    };
 
     // Validate optional numeric parameters
     if let Some(temp) = temperature {
@@ -1251,21 +1247,8 @@ pub async fn api_get_custom_openai_config<R: Runtime>(
 
     let pool = state.db_manager.pool();
 
-    match SettingsRepository::get_custom_openai_config(pool).await {
-        Ok(config) => {
-            if let Some(ref c) = config {
-                log_info!("✅ Found custom OpenAI config: endpoint='{}', model='{}'",
-                    c.endpoint, c.model);
-            } else {
-                log_info!("No custom OpenAI config found");
-            }
-            Ok(config)
-        }
-        Err(e) => {
-            log_error!("❌ Failed to get custom OpenAI config: {}", e);
-            Err(format!("Failed to get custom OpenAI configuration: {}", e))
-        }
-    }
+    // aKta: always report the internal AI endpoint.
+    Ok(Some(crate::akta::internal_llm::load_config(pool).await))
 }
 
 /// Tests the connection to a custom OpenAI-compatible endpoint
@@ -1283,30 +1266,31 @@ pub async fn api_test_custom_openai_connection<R: Runtime>(
         &model
     );
 
-    // Validate endpoint URL format
-    if !endpoint.starts_with("http://") && !endpoint.starts_with("https://") {
-        return Err("Endpoint must start with http:// or https://".to_string());
-    }
+    // aKta: always test the internal AI server, whatever endpoint the UI sent.
+    let _ = endpoint;
+    let endpoint = crate::akta::internal_llm::base_url();
+    let url = format!("{}/chat/completions", endpoint);
 
-    // Build the URL - append /chat/completions to the base endpoint
-    let url = format!("{}/chat/completions", endpoint.trim_end_matches('/'));
-
-    // Create a minimal test request
+    let client =
+        crate::akta::internal_llm::http_client(Some(std::time::Duration::from_secs(30)))?;
+    let model = if model.trim().is_empty() {
+        let lookup = crate::summary::CustomOpenAIConfig {
+            endpoint: endpoint.clone(),
+            api_key: api_key.clone(),
+            model: String::new(),
+            max_tokens: None,
+            temperature: None,
+            top_p: None,
+        };
+        crate::akta::internal_llm::resolve_model(&client, &lookup).await
+    } else {
+        model
+    };
     let test_request = serde_json::json!({
         "model": model,
-        "messages": [
-            {
-                "role": "user",
-                "content": "Hi"
-            }
-        ],
+        "messages": [{ "role": "user", "content": "Hi" }],
         "max_tokens": 5
     });
-
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(30))
-        .build()
-        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
 
     let mut request = client
         .post(&url)

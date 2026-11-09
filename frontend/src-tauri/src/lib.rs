@@ -35,6 +35,7 @@ pub(crate) use perf_trace;
 // Re-export async logging macros for external use (removed due to macro conflicts)
 
 // Declare audio module
+pub mod akta;
 pub mod analytics;
 pub mod api;
 pub mod audio;
@@ -585,6 +586,8 @@ pub fn run() {
             })
             .expect("Failed to initialize database");
 
+            akta::start_background_tasks(_app.handle().clone());
+
             // Initialize bundled templates directory for dynamic template discovery
             log::info!("Initializing bundled templates directory...");
             if let Ok(resource_path) = _app.handle().path().resource_dir() {
@@ -616,6 +619,11 @@ pub fn run() {
             get_transcription_status,
             read_audio_file,
             save_transcript,
+            akta::commands::akta_supabase_get_config,
+            akta::commands::akta_supabase_save_config,
+            akta::commands::akta_supabase_test_connection,
+            akta::commands::akta_supabase_sync_now,
+            akta::commands::akta_supabase_get_status,
             analytics::commands::init_analytics,
             analytics::commands::disable_analytics,
             analytics::commands::track_event,

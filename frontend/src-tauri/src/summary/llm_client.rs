@@ -6,7 +6,8 @@ use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
-const REQUEST_TIMEOUT_DURATION: Duration = Duration::from_secs(300);
+// Local llama.cpp hardware can be slow on long transcripts.
+const REQUEST_TIMEOUT_DURATION: Duration = Duration::from_secs(900);
 
 async fn await_or_cancel<T>(
     operation: impl Future<Output = T>,
