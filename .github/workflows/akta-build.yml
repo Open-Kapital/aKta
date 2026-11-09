@@ -13,7 +13,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: "macos-latest"
+          - platform: "macos-15" # llama.cpp cpp-httplib fails to compile against OpenSSL on the macos-26 (latest) image
             args: "--target aarch64-apple-darwin"
             target: "aarch64-apple-darwin"
           - platform: "windows-latest"
