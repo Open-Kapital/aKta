@@ -107,6 +107,11 @@ jobs:
           # Only aarch64-apple-darwin for Apple Silicon (no Intel support)
           targets: ${{ contains(inputs.platform, 'macos') && 'aarch64-apple-darwin' || '' }}
 
+      # Homebrew's OpenSSL headers break llama.cpp's vendored cpp-httplib; HTTPS support is not needed there.
+      - name: Disable OpenSSL for llama.cpp (macOS)
+        if: runner.os == 'macOS'
+        run: echo "CMAKE_DISABLE_FIND_PACKAGE_OpenSSL=TRUE" >> "$GITHUB_ENV"
+
       - name: Configure portable Windows native build
         id: windows-portability
         if: runner.os == 'Windows'
