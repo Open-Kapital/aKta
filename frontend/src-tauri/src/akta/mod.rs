@@ -1,5 +1,6 @@
 //! aKta-specific behaviour layered on top of Meetily.
 
+pub mod ata;
 pub mod internal_llm;
 
 use std::time::Duration;

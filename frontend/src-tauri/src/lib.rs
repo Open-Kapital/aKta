@@ -741,6 +741,14 @@ pub fn run() {
             // Custom OpenAI commands
             api::api_save_custom_openai_config,
             api::api_get_custom_openai_config,
+            akta::ata::akta_people_list,
+            akta::ata::akta_people_save,
+            akta::ata::akta_people_delete,
+            akta::ata::akta_report_get,
+            akta::ata::akta_report_save_meta,
+            akta::ata::akta_report_previous,
+            akta::ata::akta_report_generate,
+            akta::ata::akta_report_open_print,
             api::api_test_custom_openai_connection,
             // Summary commands
             summary::commands::api_process_transcript,

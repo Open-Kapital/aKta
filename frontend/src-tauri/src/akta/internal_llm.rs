@@ -53,7 +53,10 @@ pub fn http_client(timeout: Option<Duration>) -> Result<Client, String> {
         .map_err(|e| format!("Failed to create HTTP client for internal AI: {}", e))
 }
 
-fn with_auth(request: reqwest::RequestBuilder, api_key: Option<&str>) -> reqwest::RequestBuilder {
+pub(crate) fn with_auth(
+    request: reqwest::RequestBuilder,
+    api_key: Option<&str>,
+) -> reqwest::RequestBuilder {
     match api_key.map(str::trim).filter(|k| !k.is_empty()) {
         Some(key) => request.bearer_auth(key),
         None => request,

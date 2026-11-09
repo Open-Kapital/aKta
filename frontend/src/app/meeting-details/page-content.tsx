@@ -8,6 +8,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
 import { TranscriptPanel } from '@/components/MeetingDetails/TranscriptPanel';
 import { SummaryPanel } from '@/components/MeetingDetails/SummaryPanel';
+import { AtaPanel, SummaryAtaTabs } from '@/components/akta/AtaPanel';
 import { MeetingDetailsSplitView, type MeetingDetailsTab } from '@/components/MeetingDetails/MeetingDetailsSplitView';
 import { ModelConfig } from '@/components/ModelSettingsModal';
 
@@ -221,34 +222,39 @@ export default function PageContent({
             />
           }
           summary={
-            <SummaryPanel
-              meeting={meeting}
-              meetingTitle={meetingData.meetingTitle}
-              summaryRef={meetingData.blockNoteSummaryRef}
-              isSaving={meetingData.isSaving}
-              isSummaryDirty={meetingData.isSummaryDirty}
-              onSaveAll={meetingData.saveAllChanges}
-              onCopySummary={copyOperations.handleCopySummary}
-              aiSummary={meetingData.aiSummary}
-              summaryStatus={summaryGeneration.summaryStatus}
-              transcripts={meetingData.transcripts}
-              modelConfig={modelConfig}
-              setModelConfig={setModelConfig}
-              onSaveModelConfig={handleSaveModelConfig}
-              onGenerateSummary={summaryGeneration.handleGenerateSummary}
-              onStopGeneration={summaryGeneration.handleStopGeneration}
-              customPrompt={customPrompt}
-              onSaveSummary={meetingData.handleSaveSummary}
-              onSummaryChange={meetingData.handleSummaryChange}
-              onDirtyChange={meetingData.setIsSummaryDirty}
-              summaryError={summaryGeneration.summaryError}
-              onRegenerateSummary={summaryGeneration.handleRegenerateSummary}
-              getSummaryStatusMessage={summaryGeneration.getSummaryStatusMessage}
-              availableTemplates={templates.availableTemplates}
-              selectedTemplate={templates.selectedTemplate}
-              onTemplateSelect={templates.handleTemplateSelection}
-              isModelConfigLoading={isModelConfigLoading}
-              onOpenModelSettings={handleRegisterModalOpen}
+            <SummaryAtaTabs
+              ata={<AtaPanel meeting={meeting} meetingTitle={meetingData.meetingTitle} />}
+              summary={
+                <SummaryPanel
+                  meeting={meeting}
+                  meetingTitle={meetingData.meetingTitle}
+                  summaryRef={meetingData.blockNoteSummaryRef}
+                  isSaving={meetingData.isSaving}
+                  isSummaryDirty={meetingData.isSummaryDirty}
+                  onSaveAll={meetingData.saveAllChanges}
+                  onCopySummary={copyOperations.handleCopySummary}
+                  aiSummary={meetingData.aiSummary}
+                  summaryStatus={summaryGeneration.summaryStatus}
+                  transcripts={meetingData.transcripts}
+                  modelConfig={modelConfig}
+                  setModelConfig={setModelConfig}
+                  onSaveModelConfig={handleSaveModelConfig}
+                  onGenerateSummary={summaryGeneration.handleGenerateSummary}
+                  onStopGeneration={summaryGeneration.handleStopGeneration}
+                  customPrompt={customPrompt}
+                  onSaveSummary={meetingData.handleSaveSummary}
+                  onSummaryChange={meetingData.handleSummaryChange}
+                  onDirtyChange={meetingData.setIsSummaryDirty}
+                  summaryError={summaryGeneration.summaryError}
+                  onRegenerateSummary={summaryGeneration.handleRegenerateSummary}
+                  getSummaryStatusMessage={summaryGeneration.getSummaryStatusMessage}
+                  availableTemplates={templates.availableTemplates}
+                  selectedTemplate={templates.selectedTemplate}
+                  onTemplateSelect={templates.handleTemplateSelection}
+                  isModelConfigLoading={isModelConfigLoading}
+                  onOpenModelSettings={handleRegisterModalOpen}
+                />
+              }
             />
           }
         />
