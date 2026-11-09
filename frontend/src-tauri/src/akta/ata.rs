@@ -668,4 +668,31 @@ mod tests {
         assert!(chunks.len() > 1);
         assert!(chunks.iter().all(|c| c.chars().count() <= 100));
     }
+
+    /// AKTA_LLM_BASE_URL=https://127.0.0.1:18081/v1 cargo test --lib akta_ata_e2e -- --ignored
+    #[tokio::test]
+    #[ignore]
+    async fn akta_ata_e2e() {
+        let client = internal_llm::http_client(Some(Duration::from_secs(30))).unwrap();
+        let context = internal_llm::context_window(&client, None).await;
+        let llm = Llm {
+            client,
+            model: "mock".into(),
+            api_key: None,
+            context,
+        };
+        let participants = vec![("Pedro Ventura".to_string(), "PV".to_string())];
+        let header = meeting_header(&json!({"titulo": "Teste"}), &participants);
+        let source = condense_if_needed(&llm, &header, "[00:01] vamos lançar na sexta".into())
+            .await
+            .unwrap();
+        let report = llm
+            .generate_report(&header, &source, &participants)
+            .await
+            .unwrap();
+        assert_eq!(
+            report["secoes"][0]["topicos"][0]["acoes"][0]["responsaveis"][0],
+            "PV"
+        );
+    }
 }
