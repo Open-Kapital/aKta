@@ -58,7 +58,7 @@ export default function PageContent({
   });
 
   // State
-  const [customPrompt, setCustomPrompt] = useState<string>('');
+  const customPrompt = '';
   const isRecording = false;
   const [activeTab, setActiveTab] = useState<MeetingDetailsTab>('transcript');
 
@@ -203,8 +203,6 @@ export default function PageContent({
           transcript={
             <TranscriptPanel
               transcripts={meetingData.transcripts}
-              customPrompt={customPrompt}
-              onPromptChange={setCustomPrompt}
               onCopyTranscript={copyOperations.handleCopyTranscript}
               onOpenMeetingFolder={meetingOperations.handleOpenMeetingFolder}
               isRecording={isRecording}

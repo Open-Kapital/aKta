@@ -20,6 +20,8 @@ export interface AtaMeta {
   participantes: AtaPerson[];
   documento: string;
   referencia: string;
+  /** Free-form extra context fed to the AI when generating the ata. */
+  contexto?: string;
 }
 
 export interface AtaAction {

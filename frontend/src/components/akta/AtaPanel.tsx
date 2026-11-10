@@ -277,6 +277,15 @@ export function AtaPanel({ meeting, meetingTitle }: AtaPanelProps) {
                 />
               </div>
             </div>
+            <div>
+              <Label className="text-xs text-gray-600">Contexto adicional para a IA</Label>
+              <textarea
+                className="mt-1 min-h-[64px] w-full resize-y rounded-md border border-gray-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                placeholder="Ex.: objetivo da reunião, pauta esperada, quem é quem na sala..."
+                value={meta.contexto ?? ''}
+                onChange={(e) => update({ contexto: e.target.value })}
+              />
+            </div>
             <div className="flex justify-end">
               <Button size="sm" variant="outline" onClick={saveMeta}>
                 Salvar dados

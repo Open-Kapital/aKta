@@ -1,3 +1,61 @@
+# aKta — guia rápido para o time
+
+App desktop (Tauri 2, Rust + Next.js) que grava a reunião, transcreve localmente e gera a **ata** com a IA interna da empresa — um `llama.cpp` OpenAI-compatible em `http://192.168.10.108:8081/v1` (rede interna, sem API key). Tudo fica em um SQLite local.
+
+## Rodando a partir do repositório
+
+### Pré-requisitos (qualquer plataforma)
+
+```bash
+# macOS
+xcode-select --install                 # Command Line Tools (ver abaixo sobre o Xcode completo)
+brew install cmake node
+npm install -g pnpm@9.15.9
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+```
+
+- **macOS**: o crate `cidre` (captura de áudio do sistema) roda `xcodebuild` — ou seja, é preciso o **Xcode completo** instalado, não só o Command Line Tools.
+- **Windows**: Visual Studio Build Tools com a workload de C++, mais `cmake`, `node`, `pnpm@9.15.9` e `rustup` (mesmos passos, sem brew).
+
+### Sidecar `llama-helper` (uma vez por clone, ou quando o crate mudar)
+
+```bash
+# macOS (Apple Silicon) — o export contorna um erro de OpenSSL no llama.cpp vendorizado
+export CMAKE_DISABLE_FIND_PACKAGE_OpenSSL=TRUE
+cargo build --release -p llama-helper --features metal
+mkdir -p frontend/src-tauri/binaries
+cp target/release/llama-helper frontend/src-tauri/binaries/llama-helper-aarch64-apple-darwin
+
+# Windows
+cargo build --release -p llama-helper
+mkdir frontend\src-tauri\binaries
+copy target\release\llama-helper.exe frontend\src-tauri\binaries\llama-helper-x86_64-pc-windows-msvc.exe
+```
+
+O diretório `frontend/src-tauri/binaries/` é ignorado pelo git — cada máquina gera o seu.
+
+### Rodar / gerar instalador
+
+```bash
+cd frontend
+pnpm install --frozen-lockfile
+
+pnpm tauri:dev      # desenvolvimento (compila Rust + Next e abre o app)
+pnpm tauri:build    # release: gera .dmg (macOS) ou instalador (Windows) em target/release/bundle/
+```
+
+Em desenvolvimento é possível apontar a IA para outro endpoint com `AKTA_LLM_BASE_URL` (ex.: um mock local). Em release a URL `http://192.168.10.108:8081/v1` é usada sempre — o app só fala com a IA dentro da rede interna.
+
+## Atualizando a aplicação
+
+1. `git pull` na branch de trabalho.
+2. `cd frontend && pnpm install --frozen-lockfile` (só precisa se o lockfile mudou).
+3. Se `llama-helper/` ou `Cargo.lock` mudaram, repita o passo do sidecar acima.
+4. `pnpm tauri:dev` para testar; `pnpm tauri:build` para gerar o instalador novo.
+5. Distribua o `.dmg`/instalador para o time e avise no canal o que mudou (`git log --oneline` desde a última versão ajuda). Dados locais (banco, atas, pessoas) são preservados — migrations novas rodam sozinhas no próximo start.
+
+---
+
 <div align="center" style="border-bottom: none">
     <h1>
         <img src="docs/Meetily-6.png" style="border-radius: 10px;" />

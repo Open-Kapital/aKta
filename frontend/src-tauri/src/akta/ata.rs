@@ -31,6 +31,14 @@ pub struct Person {
     pub id: Option<i64>,
     pub name: String,
     pub initials: String,
+    #[serde(default)]
+    pub context: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatTurn {
+    pub role: String,
+    pub content: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -43,17 +51,19 @@ pub struct ReportRecord {
 
 #[tauri::command]
 pub async fn akta_people_list(state: tauri::State<'_, AppState>) -> Result<Vec<Person>, String> {
-    let rows =
-        sqlx::query("SELECT id, name, initials FROM akta_people ORDER BY name COLLATE NOCASE")
-            .fetch_all(state.db_manager.pool())
-            .await
-            .map_err(db_err)?;
+    let rows = sqlx::query(
+        "SELECT id, name, initials, context FROM akta_people ORDER BY name COLLATE NOCASE",
+    )
+    .fetch_all(state.db_manager.pool())
+    .await
+    .map_err(db_err)?;
     Ok(rows
         .iter()
         .map(|r| Person {
             id: Some(r.get("id")),
             name: r.get("name"),
             initials: r.get("initials"),
+            context: r.get("context"),
         })
         .collect())
 }
@@ -76,16 +86,20 @@ pub async fn akta_people_save(
     }
     let pool = state.db_manager.pool();
     let result = match person.id {
-        Some(id) => sqlx::query("UPDATE akta_people SET name = ?, initials = ? WHERE id = ?")
+        Some(id) => {
+            sqlx::query("UPDATE akta_people SET name = ?, initials = ?, context = ? WHERE id = ?")
+                .bind(&name)
+                .bind(&initials)
+                .bind(&person.context)
+                .bind(id)
+                .execute(pool)
+                .await
+                .map(|_| id)
+        }
+        None => sqlx::query("INSERT INTO akta_people (name, initials, context) VALUES (?, ?, ?)")
             .bind(&name)
             .bind(&initials)
-            .bind(id)
-            .execute(pool)
-            .await
-            .map(|_| id),
-        None => sqlx::query("INSERT INTO akta_people (name, initials) VALUES (?, ?)")
-            .bind(&name)
-            .bind(&initials)
+            .bind(&person.context)
             .execute(pool)
             .await
             .map(|r| r.last_insert_rowid()),
@@ -95,6 +109,7 @@ pub async fn akta_people_save(
             id: Some(id),
             name,
             initials,
+            context: person.context,
         }),
         Err(e) if e.to_string().contains("UNIQUE") => {
             Err(format!("Já existe uma pessoa com as iniciais {}", initials))
@@ -213,7 +228,8 @@ pub async fn akta_report_generate(
     );
 
     let participants = participants_from_meta(&meta);
-    let header = meeting_header(&meta, &participants);
+    let people_context = people_context_block(&pool, &participants).await;
+    let header = meeting_header(&meta, &participants, &people_context);
     let source = condense_if_needed(&llm, &header, transcript).await?;
     let report = llm.generate_report(&header, &source, &participants).await?;
 
@@ -223,7 +239,45 @@ pub async fn akta_report_generate(
         .execute(&pool)
         .await
         .map_err(db_err)?;
+
+    learn_people_context(&llm, &pool, &participants, &source).await;
+
     Ok(report)
+}
+
+/// Free-form questions about a meeting's transcript ("chat com a reunião").
+/// Uses the whole people roster as context since questions may mention anyone.
+#[tauri::command]
+pub async fn akta_meeting_chat(
+    state: tauri::State<'_, AppState>,
+    meeting_id: String,
+    question: String,
+    history: Vec<ChatTurn>,
+) -> Result<String, String> {
+    let question = question.trim().to_string();
+    if question.is_empty() {
+        return Err("Pergunta vazia".to_string());
+    }
+    let pool = state.db_manager.pool();
+    let transcript = load_transcript(pool, &meeting_id).await?;
+    if transcript.trim().is_empty() {
+        return Err("A reunião não tem transcrição".to_string());
+    }
+    let config = internal_llm::load_config(pool).await;
+    let client = internal_llm::http_client(Some(REQUEST_TIMEOUT))?;
+    let model = internal_llm::resolve_model(&client, &config).await;
+    let api_key = config.api_key.as_deref().filter(|k| !k.trim().is_empty());
+    let context = internal_llm::context_window(&client, api_key).await;
+    let llm = Llm {
+        client,
+        model,
+        api_key: api_key.map(str::to_string),
+        context,
+    };
+    let people_context = people_context_block(pool, &[]).await;
+    info!("akta chat: question for {}", meeting_id);
+    llm.meeting_chat(&transcript, &people_context, &history, &question)
+        .await
 }
 
 /// Writes the rendered report to the app data dir and opens it in a window that
@@ -340,7 +394,7 @@ fn participants_from_meta(meta: &Value) -> Vec<(String, String)> {
         .unwrap_or_default()
 }
 
-fn meeting_header(meta: &Value, participants: &[(String, String)]) -> String {
+fn meeting_header(meta: &Value, participants: &[(String, String)], people_context: &str) -> String {
     let field = |k: &str| {
         meta.get(k)
             .and_then(Value::as_str)
@@ -357,14 +411,177 @@ fn meeting_header(meta: &Value, participants: &[(String, String)]) -> String {
             .collect::<Vec<_>>()
             .join("\n")
     };
-    format!(
+    let mut header = format!(
         "Reunião: {}\nÁrea: {}\nData: {}\nModalidade: {}\nParticipantes:\n{}",
         field("titulo"),
         field("area_nome"),
         field("data_extenso"),
         field("modalidade"),
         people
+    );
+    if !people_context.is_empty() {
+        header.push_str("\n\nO que já sabemos sobre os participantes:\n");
+        header.push_str(people_context);
+    }
+    let extra = field("contexto");
+    if !extra.is_empty() {
+        header.push_str("\n\nContexto adicional informado pelo usuário:\n");
+        header.push_str(&extra);
+    }
+    header
+}
+
+/// Stored per-person notes learned from previous meetings. When `restrict`
+/// is non-empty only those initials are returned; otherwise the whole roster.
+async fn people_context_block(pool: &SqlitePool, restrict: &[(String, String)]) -> String {
+    let rows = sqlx::query(
+        "SELECT name, initials, context FROM akta_people WHERE context != '' ORDER BY name",
     )
+    .fetch_all(pool)
+    .await
+    .unwrap_or_default();
+    let lines: Vec<String> = rows
+        .iter()
+        .filter(|r| {
+            restrict.is_empty()
+                || restrict
+                    .iter()
+                    .any(|(_, i)| i.eq_ignore_ascii_case(r.get::<String, _>("initials").as_str()))
+        })
+        .map(|r| {
+            format!(
+                "- {} ({}): {}",
+                r.get::<String, _>("name"),
+                r.get::<String, _>("initials"),
+                r.get::<String, _>("context")
+            )
+        })
+        .collect();
+    lines.join("\n")
+}
+
+/// After a report is generated, refresh each participant's stored notes.
+/// Failures only get logged: learning must never block the ata.
+async fn learn_people_context(
+    llm: &Llm,
+    pool: &SqlitePool,
+    participants: &[(String, String)],
+    source: &str,
+) {
+    if participants.is_empty() {
+        return;
+    }
+    let initials: Vec<String> = participants.iter().map(|(_, i)| i.clone()).collect();
+    let mut current = Vec::new();
+    for i in &initials {
+        let row = sqlx::query("SELECT name, context FROM akta_people WHERE initials = ?")
+            .bind(i)
+            .fetch_optional(pool)
+            .await;
+        if let Ok(Some(row)) = row {
+            let name: String = row.get("name");
+            let context: String = row.get("context");
+            current.push(format!(
+                "- {} ({}): {}",
+                name,
+                i,
+                if context.trim().is_empty() {
+                    "(sem notas ainda)"
+                } else {
+                    context.trim()
+                }
+            ));
+        }
+    }
+    if current.is_empty() {
+        return;
+    }
+    let schema = json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["pessoas"],
+        "properties": {
+            "pessoas": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["iniciais", "contexto"],
+                    "properties": {
+                        "iniciais": {"enum": initials},
+                        "contexto": {"type": "string"}
+                    }
+                }
+            }
+        }
+    });
+    let excerpt = truncate_middle(source, 30000);
+    let user = format!(
+        "Fichas atuais:\n{}\n\nMaterial da reunião:\n{}",
+        current.join("\n"),
+        excerpt
+    );
+    let content = match llm
+        .chat(LEARN_SYSTEM_PROMPT, &user, 4096, Some(&schema))
+        .await
+    {
+        Ok(c) => c,
+        Err(e) => {
+            warn!("akta ata: people learning failed: {}", e);
+            return;
+        }
+    };
+    let parsed = content
+        .find('{')
+        .and_then(|s| content.rfind('}').map(|e| (s, e)))
+        .and_then(|(s, e)| serde_json::from_str::<Value>(&content[s..=e]).ok());
+    let Some(parsed) = parsed else {
+        warn!("akta ata: people learning returned invalid JSON");
+        return;
+    };
+    let Some(pessoas) = parsed.get("pessoas").and_then(Value::as_array) else {
+        return;
+    };
+    for p in pessoas {
+        let (Some(ini), Some(ctx)) = (
+            p.get("iniciais").and_then(Value::as_str),
+            p.get("contexto").and_then(Value::as_str),
+        ) else {
+            continue;
+        };
+        let ctx = ctx.trim();
+        if ctx.is_empty() || ctx == "(sem notas ainda)" {
+            continue;
+        }
+        if let Err(e) = sqlx::query("UPDATE akta_people SET context = ? WHERE initials = ?")
+            .bind(ctx)
+            .bind(ini)
+            .execute(pool)
+            .await
+        {
+            warn!("akta ata: failed to save learned context for {}: {}", ini, e);
+        } else {
+            info!("akta ata: learned context for {}", ini);
+        }
+    }
+}
+
+/// Keeps the beginning and end of a long text, marking the elided middle.
+fn truncate_middle(text: &str, max_chars: usize) -> String {
+    if text.chars().count() <= max_chars {
+        return text.to_string();
+    }
+    let half = max_chars / 2;
+    let head: String = text.chars().take(half).collect();
+    let tail: String = text
+        .chars()
+        .rev()
+        .take(half)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    format!("{}\n\n[...trecho omitido...]\n\n{}", head, tail)
 }
 
 fn estimate_tokens(text: &str) -> usize {
@@ -490,6 +707,55 @@ impl Llm {
         let status = response.status();
         let text = response.text().await.map_err(|e| e.to_string())?;
         Ok((status, text))
+    }
+
+    /// Answers a free-form question about the transcript, keeping the last
+    /// turns of the conversation for follow-up questions.
+    async fn meeting_chat(
+        &self,
+        transcript: &str,
+        people_context: &str,
+        history: &[ChatTurn],
+        question: &str,
+    ) -> Result<String, String> {
+        let answer_budget = 2048usize;
+        let history_text: String = history
+            .iter()
+            .rev()
+            .take(8)
+            .rev()
+            .filter(|t| !t.content.trim().is_empty())
+            .map(|t| {
+                format!(
+                    "{}: {}",
+                    if t.role == "assistant" { "aKta" } else { "Usuário" },
+                    t.content.trim()
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let reserved = answer_budget + estimate_tokens(&history_text) + 1500;
+        let budget = self.context.saturating_sub(reserved).max(2000);
+        let source = if estimate_tokens(transcript) > budget {
+            truncate_middle(transcript, budget * 3)
+        } else {
+            transcript.to_string()
+        };
+        let mut user = String::new();
+        if !people_context.is_empty() {
+            user.push_str("Pessoas conhecidas:\n");
+            user.push_str(people_context);
+            user.push_str("\n\n");
+        }
+        user.push_str("Transcrição da reunião:\n");
+        user.push_str(&source);
+        if !history_text.is_empty() {
+            user.push_str("\n\nConversa até aqui:\n");
+            user.push_str(&history_text);
+        }
+        user.push_str("\n\nPergunta: ");
+        user.push_str(question);
+        self.chat(CHAT_SYSTEM_PROMPT, &user, answer_budget, None).await
     }
 
     async fn generate_report(
@@ -618,6 +884,16 @@ Regras:
 
 const REPORT_FORMAT_HINT: &str = r#"{"resumo": ["..."], "secoes": [{"titulo": "...", "topicos": [{"titulo": "...", "blocos": [{"tipo": "paragrafo|lista|decisao|alerta|info", "texto": "...", "itens": ["..."]}], "acoes": [{"descricao": "...", "responsaveis": ["PV"], "prazo": "A definir"}]}]}]}"#;
 
+const CHAT_SYSTEM_PROMPT: &str = "Você é o assistente do aKta e responde perguntas sobre a transcrição de uma reunião da Open Kapital, em português do Brasil.
+
+Regras:
+- Responda somente com base na transcrição e nas fichas de pessoas fornecidas; diga quando algo não estiver na reunião.
+- A transcrição vem de um único microfone e não identifica quem fala: deduza pelo contexto e cite os trechos relevantes com o horário quando possível.
+- Seja direto: responda primeiro, depois justifique com os trechos. Use as iniciais das pessoas quando se referir a alguém.";
+
+const LEARN_SYSTEM_PROMPT: &str = "Você mantém fichas curtas sobre os participantes das reuniões da Open Kapital, em português do Brasil.
+A partir das notas anteriores e do material desta reunião, reescreva a ficha de cada pessoa com no máximo 4 frases: papel provável, responsabilidades recorrentes, temas que costuma tratar e como costuma se manifestar. Mantenha o que estava correto, corrija o que estiver errado, não invente fatos. Responda somente com o JSON.";
+
 const NOTES_SYSTEM_PROMPT: &str = "Você prepara notas detalhadas de um trecho de reunião para depois redigir a ata, em português do Brasil.
 A transcrição vem de um único microfone e não identifica quem fala: deduza pelo contexto e use as iniciais da lista de participantes.
 Liste, sem perder fatos, números, nomes e datas:
@@ -682,7 +958,7 @@ mod tests {
             context,
         };
         let participants = vec![("Pedro Ventura".to_string(), "PV".to_string())];
-        let header = meeting_header(&json!({"titulo": "Teste"}), &participants);
+        let header = meeting_header(&json!({"titulo": "Teste"}), &participants, "");
         let source = condense_if_needed(&llm, &header, "[00:01] vamos lançar na sexta".into())
             .await
             .unwrap();

@@ -11,7 +11,7 @@ use crate::database::repositories::setting::SettingsRepository;
 use crate::summary::CustomOpenAIConfig;
 
 pub const PROVIDER: &str = "custom-openai";
-pub const DEFAULT_BASE_URL: &str = "https://192.168.10.108:8081/v1";
+pub const DEFAULT_BASE_URL: &str = "http://192.168.10.108:8081/v1";
 pub const FALLBACK_MODEL: &str = "akta-internal";
 const DEFAULT_CONTEXT_TOKENS: usize = 8192;
 const DEV_BASE_URL_ENV: &str = "AKTA_LLM_BASE_URL";
@@ -36,10 +36,10 @@ fn server_root(base_url: &str) -> &str {
     trimmed.strip_suffix("/v1").unwrap_or(trimmed)
 }
 
-/// HTTP client used exclusively for the internal server. The server sits on
-/// a private IP with a self-signed certificate, so certificate and hostname
-/// validation are relaxed for this client only; redirects are disabled so it
-/// can never be bounced to another host.
+/// HTTP client used exclusively for the internal server. The server serves
+/// plain HTTP on a private IP (certificate and hostname validation are relaxed
+/// anyway, in case it ever moves behind a self-signed certificate); redirects
+/// are disabled so it can never be bounced to another host.
 pub fn http_client(timeout: Option<Duration>) -> Result<Client, String> {
     let mut builder = Client::builder()
         .danger_accept_invalid_certs(true)
@@ -235,7 +235,7 @@ mod tests {
 
     #[test]
     fn release_default_is_internal_server() {
-        assert_eq!(DEFAULT_BASE_URL, "https://192.168.10.108:8081/v1");
+        assert_eq!(DEFAULT_BASE_URL, "http://192.168.10.108:8081/v1");
     }
 }
 

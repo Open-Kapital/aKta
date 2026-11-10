@@ -749,6 +749,7 @@ pub fn run() {
             akta::ata::akta_report_previous,
             akta::ata::akta_report_generate,
             akta::ata::akta_report_open_print,
+            akta::ata::akta_meeting_chat,
             api::api_test_custom_openai_connection,
             // Summary commands
             summary::commands::api_process_transcript,

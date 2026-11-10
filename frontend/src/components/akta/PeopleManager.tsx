@@ -11,6 +11,7 @@ export interface Person {
   id: number | null;
   name: string;
   initials: string;
+  context: string;
 }
 
 export function suggestInitials(name: string): string {
@@ -46,7 +47,7 @@ export function AddPersonForm({ onAdded }: { onAdded: (person: Person) => void }
     if (!canSubmit) return;
     try {
       const person = await invoke<Person>('akta_people_save', {
-        person: { id: null, name, initials },
+        person: { id: null, name, initials, context: '' },
       });
       setName('');
       setInitials('');
@@ -86,6 +87,60 @@ export function AddPersonForm({ onAdded }: { onAdded: (person: Person) => void }
   );
 }
 
+function PersonRow({ person, onChanged, onDelete }: { person: Person; onChanged: () => void; onDelete: (p: Person) => void }) {
+  const [open, setOpen] = useState(false);
+  const [context, setContext] = useState(person.context);
+  const [saving, setSaving] = useState(false);
+  const dirty = context !== person.context;
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await invoke('akta_people_save', { person: { ...person, context } });
+      toast.success(`Ficha de ${person.name} salva`);
+      onChanged();
+    } catch (err) {
+      toast.error(String(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <li className="py-2">
+      <div className="flex items-center justify-between">
+        <button className="flex items-center gap-3 text-left" onClick={() => setOpen((v) => !v)}>
+          <span className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white">
+            {person.initials}
+          </span>
+          <span className="text-sm text-gray-900">{person.name}</span>
+          {person.context.trim() !== '' && !open && (
+            <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-medium text-blue-700">com notas</span>
+          )}
+        </button>
+        <Button variant="ghost" size="sm" onClick={() => onDelete(person)} aria-label={`Remover ${person.name}`}>
+          <Trash2 className="h-4 w-4 text-gray-500" />
+        </Button>
+      </div>
+      {open && (
+        <div className="mt-2 pl-11">
+          <textarea
+            className="min-h-[72px] w-full resize-y rounded-md border border-gray-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            placeholder="Notas sobre a pessoa aprendidas das reuniões (papel, responsabilidades recorrentes...). Edite se a IA registrar algo errado."
+            value={context}
+            onChange={(e) => setContext(e.target.value)}
+          />
+          <div className="mt-1 flex justify-end">
+            <Button size="sm" variant="outline" onClick={save} disabled={!dirty || saving}>
+              {saving ? 'Salvando…' : 'Salvar ficha'}
+            </Button>
+          </div>
+        </div>
+      )}
+    </li>
+  );
+}
+
 export function PeopleManager() {
   const { people, refresh } = usePeople();
 
@@ -104,21 +159,12 @@ export function PeopleManager() {
       <h3 className="text-lg font-semibold text-gray-900">Pessoas</h3>
       <p className="mb-4 text-sm text-gray-600">
         Participantes das reuniões. As iniciais são usadas nas atas para indicar quem é responsável por cada ação.
+        A cada ata gerada a IA atualiza as notas de cada pessoa — clique em alguém para revisar ou corrigir.
       </p>
       <AddPersonForm onAdded={refresh} />
       <ul className="mt-4 divide-y divide-gray-100">
         {people.map((person) => (
-          <li key={person.id} className="flex items-center justify-between py-2">
-            <span className="flex items-center gap-3">
-              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white">
-                {person.initials}
-              </span>
-              <span className="text-sm text-gray-900">{person.name}</span>
-            </span>
-            <Button variant="ghost" size="sm" onClick={() => remove(person)} aria-label={`Remover ${person.name}`}>
-              <Trash2 className="h-4 w-4 text-gray-500" />
-            </Button>
-          </li>
+          <PersonRow key={person.id} person={person} onChanged={refresh} onDelete={remove} />
         ))}
         {people.length === 0 && <li className="py-2 text-sm text-gray-500">Nenhuma pessoa cadastrada.</li>}
       </ul>
