@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import Analytics from '@/lib/analytics';
 import { invoke as invokeTauri } from '@tauri-apps/api/core';
 import { hasVisibleSummaryContent } from '@/lib/summary-content';
+import { copyText } from '@/lib/clipboard';
 
 interface UseCopyOperationsProps {
   meeting: any;
@@ -90,7 +91,7 @@ export function useCopyOperations({
       .map(t => `${formatTime(t.audio_start_time, t.timestamp)} ${t.text}  `)
       .join('\n');
 
-    await navigator.clipboard.writeText(header + date + fullTranscript);
+    await copyText(header + date + fullTranscript);
     toast.success("Transcript copied to clipboard");
 
     // Track copy analytics
@@ -178,7 +179,7 @@ export function useCopyOperations({
       })}\n\n---\n\n`;
 
       const fullMarkdown = header + metadata + summaryMarkdown;
-      await navigator.clipboard.writeText(fullMarkdown);
+      await copyText(fullMarkdown);
 
       console.log('✅ Successfully copied to clipboard!');
       toast.success("Summary copied to clipboard");

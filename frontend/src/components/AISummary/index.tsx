@@ -5,6 +5,7 @@ import { Summary, Block } from '@/types';
 import { Section } from './Section';
 import { EditableTitle } from '../EditableTitle';
 import { ExclamationTriangleIcon, CheckCircleIcon, ClipboardDocumentCheckIcon } from '@heroicons/react/24/outline';
+import { copyText } from '@/lib/clipboard';
 
 interface Props {
   summary: Summary | null;
@@ -423,7 +424,7 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
             return '';
           }).filter(Boolean);
 
-          navigator.clipboard.writeText(blockContents.join('\n'));
+          copyText(blockContents.join('\n'));
         }
       } else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedBlocks.length > 1) {
         e.preventDefault();
@@ -520,7 +521,7 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
 
   const handleCopyBlocks = useCallback(() => {
     const content = getSelectedBlocksContent();
-    navigator.clipboard.writeText(content);
+    copyText(content);
     setContextMenu(prev => ({ ...prev, visible: false }));
   }, [getSelectedBlocksContent]);
 
@@ -770,7 +771,7 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
           <button
             onClick={() => {
               const markdown = convertToMarkdown();
-              navigator.clipboard.writeText(markdown);
+              copyText(markdown);
             }}
             className="px-2 py-1 text-sm bg-gray-100 hover:bg-gray-200 rounded-md flex items-center space-x-1"
           >
