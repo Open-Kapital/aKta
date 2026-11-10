@@ -7,6 +7,7 @@ import { load } from '@tauri-apps/plugin-store';
 import { invoke } from '@tauri-apps/api/core';
 import { Analytics } from '@/lib/analytics';
 import AnalyticsDataModal from './AnalyticsDataModal';
+import { copyText } from '@/lib/clipboard';
 
 const ANALYTICS_DEFAULT_OFF_MIGRATION_KEY = 'analyticsDefaultOffMigrationV1';
 
@@ -39,7 +40,7 @@ export default function AnalyticsConsentSwitch() {
     if (!userId) return;
 
     try {
-      await navigator.clipboard.writeText(userId);
+      await copyText(userId);
       setIsCopied(true);
       setTimeout(() => setIsCopied(false), 2000);
 
